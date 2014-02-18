@@ -12,6 +12,7 @@ class fitsimage:
         self.psfname = psfname
         self.imgHDUlist = pyfits.open("{}".format(self.imagename))
         self.psfHDUlist = pyfits.open("{}".format(self.psfname))
+        self.dirtyoriginal = self.imgHDUlist[0].data[0,0,:,:]
         self.dirtyimg = self.imgHDUlist[0].data[0,0,:,:]
         self.psf = self.psfHDUlist[0].data[0,0,:,:]
         self.imgHDUlist.close()
@@ -98,6 +99,7 @@ class fitsimage:
         self.cleanbeam = ellipgauss(xyz[:,0:2],opt[0],opt[1],opt[2],opt[3],opt[4]).reshape(gridx.shape,order="C")
         self.cleancomp = fftconvolve(self.cleanmap,self.cleanbeam,mode='same')
         self.cleanimg = self.cleancomp + self.dirtyimg
+        self.residual = self.dirtyoriginal - self.cleancomp
 
         # TEST CODE - CHECK CONTOUR MAPS
         # pb.contour(gridx,gridy,self.cleanbeam)
@@ -112,16 +114,24 @@ class fitsimage:
         This method simply saves the CLEAN image as well as the residual map.
         """
         data = np.zeros([1,1,self.dirtyimg.shape[0],self.dirtyimg.shape[1]])
-        data[0,0,512:(512+1024),512:(512+1024)] += self.dirtyimg[512:(512+1024),512:(512+1024)]
+        data[0,0,:,:] += self.residual
         newfile = pyfits.PrimaryHDU(data,self.imgHDUlist[0].header)
         newfile.writeto("residual_"+"{}".format(self.imagename))
+        # data = np.zeros([1,1,self.dirtyimg.shape[0],self.dirtyimg.shape[1]])
+        # data[0,0,512:(512+1024),512:(512+1024)] += self.dirtyimg[512:(512+1024),512:(512+1024)]
+        # newfile = pyfits.PrimaryHDU(data,self.imgHDUlist[0].header)
+        # newfile.writeto("residual_"+"{}".format(self.imagename))
         # data[0,0,:,:] = self.cleanimg
         # newfile = pyfits.PrimaryHDU(data,self.imgHDUlist[0].header)
         # newfile.writeto("fullclean_"+"{}".format(self.imagename))
         data = np.zeros([1,1,self.dirtyimg.shape[0],self.dirtyimg.shape[1]])
         data[0,0,512:(512+1024),512:(512+1024)] += self.cleanimg[512:(512+1024),512:(512+1024)]
         newfile = pyfits.PrimaryHDU(data[0],self.imgHDUlist[0].header)
-        newfile.writeto("clean_"+"{}".format(self.imagename))
+        newfile.writeto("restored_"+"{}".format(self.imagename))
+        data = np.zeros([1,1,self.dirtyimg.shape[0],self.dirtyimg.shape[1]])
+        data[0,0,:,:] += self.cleanmap
+        newfile = pyfits.PrimaryHDU(data,self.imgHDUlist[0].header)
+        newfile.writeto("cleancomp_"+"{}".format(self.imagename))
 
 img = fitsimage("KAT7_1445_1x16_12h.ms.CORRECTED_DATA.channel.1ch_nobright.fits","KAT7_1445_1x16_12h.ms.psf.channel"
                                                                                  ".1ch.fits")
