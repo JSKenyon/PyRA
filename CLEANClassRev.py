@@ -7,6 +7,8 @@ from scipy.signal import fftconvolve
 class fitsimage:
     """A class for the manipulation of .fits images - in particular for implementing deconvolution."""
 
+    # Opens the original .fits images and stores their contents in appropriate variables for later use. Also
+    # initialises some variables which are used throughout the class, in particular the central index of the PSF.
     def __init__(self,imagename,psfname):
         self.imagename = imagename
         self.psfname = psfname
@@ -32,6 +34,10 @@ class fitsimage:
         self.threshold = threshold
         self.gain = gain
 
+        # The following determines the location of the current maximum pixel and then moves the center of the PSF to
+        # that location by rolling the PSF and then zeroing entries which rolled beyond the edges of the array. The
+        # rolled PSF is multiplied by a gain value and then subtracted from the dirty image. This process is repeated
+        # iteratively until such time as a maximum iteration is reached, or the specified threshold value is reached.
         for iter in range(self.maxiter):
             i,j = np.unravel_index(self.dirtyimg[self.n/2:self.m/2+self.m,self.n/2:self.n/2+self.n].argmax(),
                                    self.dirtyimg[self.m/2:self.m/2+self.m,self.n/2:self.n/2+self.n].shape)
@@ -59,6 +65,10 @@ class fitsimage:
         else:
             print "Threshold reached. {} iterations performed.".format(iter)
 
+        # The following determines the region which the main lobe of the PSF occupies by determining the indices of
+        # the elements inside the second zero of the PSF. CAUTION: this works in this scenario, but kk may need to be
+        # reduced in certain cases to ensure the gaussian can be fit.
+
         ii,jj = 0,0
         psfpos = (self.psf>0)
 
@@ -82,6 +92,9 @@ class fitsimage:
 
         kk = int(np.sqrt(jj**2+ii**2))
 
+        # Following creates row and column values of interest for the central PSF lobe and then selects those values
+        # from the PSF using np.where. Additionally, the inputs for the fitting are created by reshaping the x,y,
+        # and z data into columns.
         y = np.arange(self.m-kk,self.m+kk,1)
         x = np.arange(self.n-kk,self.n+kk,1)
 
@@ -91,11 +104,15 @@ class fitsimage:
         gridx, gridy = np.meshgrid(x-self.m,y-self.n)
         xyz = np.column_stack((gridx.reshape(-1,1),gridy.reshape(-1,1),z.reshape(-1,1,order="C")))
 
-        def ellipgauss(xyz,A,xshift,xsigma,yshift,ysigma):
-            return A*np.exp(-1*(((xyz[:,1]-xshift)**2)/(2*(xsigma**2))+((xyz[:,0]-yshift)**2)/(2*(ysigma**2))))
+        # Elliptical gaussian which can be fit to the central lobe of the PSF. xy must be an Nx2 array consisting of
+        # pairs of row and column values for the region of interest. This is obtained from kk above.
+        def ellipgauss(xy,A,xshift,xsigma,yshift,ysigma):
+            return A*np.exp(-1*(((xy[:,1]-xshift)**2)/(2*(xsigma**2))+((xy[:,0]-yshift)**2)/(2*(ysigma**2))))
 
+        # This command from scipy performs the fitting of the 2D gaussian, and returns the optimal coefficients in opt.
         opt = curve_fit(ellipgauss, xyz[:,0:2],xyz[:,2],(1,0,1,0,1))[0]
 
+        # Following create the data for the new images. The cleanbeam has to be reshaped to reclaim it in 2D.
         self.cleanbeam = ellipgauss(xyz[:,0:2],opt[0],opt[1],opt[2],opt[3],opt[4]).reshape(gridx.shape,order="C")
         self.cleancomp = fftconvolve(self.cleanmap,self.cleanbeam,mode='same')
         self.cleanimg = self.cleancomp + self.dirtyimg
@@ -111,23 +128,18 @@ class fitsimage:
 
     def saveimage(self):
         """
-        This method simply saves the CLEAN image as well as the residual map.
+        This method simply saves the CLEAN components, residual and restored image.
         """
         data = np.zeros([1,1,self.dirtyimg.shape[0],self.dirtyimg.shape[1]])
         data[0,0,:,:] += self.residual
         newfile = pyfits.PrimaryHDU(data,self.imgHDUlist[0].header)
         newfile.writeto("residual_"+"{}".format(self.imagename))
-        # data = np.zeros([1,1,self.dirtyimg.shape[0],self.dirtyimg.shape[1]])
-        # data[0,0,512:(512+1024),512:(512+1024)] += self.dirtyimg[512:(512+1024),512:(512+1024)]
-        # newfile = pyfits.PrimaryHDU(data,self.imgHDUlist[0].header)
-        # newfile.writeto("residual_"+"{}".format(self.imagename))
-        # data[0,0,:,:] = self.cleanimg
-        # newfile = pyfits.PrimaryHDU(data,self.imgHDUlist[0].header)
-        # newfile.writeto("fullclean_"+"{}".format(self.imagename))
+
         data = np.zeros([1,1,self.dirtyimg.shape[0],self.dirtyimg.shape[1]])
         data[0,0,512:(512+1024),512:(512+1024)] += self.cleanimg[512:(512+1024),512:(512+1024)]
         newfile = pyfits.PrimaryHDU(data[0],self.imgHDUlist[0].header)
         newfile.writeto("restored_"+"{}".format(self.imagename))
+
         data = np.zeros([1,1,self.dirtyimg.shape[0],self.dirtyimg.shape[1]])
         data[0,0,:,:] += self.cleanmap
         newfile = pyfits.PrimaryHDU(data,self.imgHDUlist[0].header)
