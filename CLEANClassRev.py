@@ -57,6 +57,9 @@ class fitsimage:
             else:
                 psfmoved[:abs(i-self.m),:]=0
 
+            ## OMS: self.dirtyimg[i,j] and self.dirtyimg.max() is the same thing, isn't it?
+            ## better use just self.dirtyimg[i,j] then -- also somewhat quicker as
+            ## you don't need to recompute the max()
             self.cleanmap[i,j] += self.gain*self.dirtyimg[i,j]
             self.dirtyimg = self.dirtyimg - (self.gain*psfmoved*self.dirtyimg.max())
 
